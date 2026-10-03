@@ -1,0 +1,46 @@
+# Configuration for 3D Physics (Meters & Angle) Human Counter Demo
+
+source:
+  device_index: 0          # Laptop camera index
+  width: 1280
+  height: 720
+  fps: 30
+
+display:
+  fullscreen: true          # Set true to use full laptop screen
+
+physics_gate:
+  mode: "frontal_depth"       # Options: "frontal_depth" or "sideways_wall"
+  direction: "towards_camera" # Options: "towards_camera", "away_from_camera", "left_to_right", "right_to_left", "both"
+  
+  # Frontal Depth Gate Settings (Pinhole Camera Model)
+  target_depth_meters: 3.5    # Virtual wall depth distance in meters (e.g., 3.5m)
+  focal_length_px: 800.0      # Estimated focal length in pixels for 720p/1080p webcams
+  human_height_meters: 1.75   # Standard human reference height in meters
+  
+  # Sideways Wall Gate Settings (Angular Ray Sweeper)
+  wall_x_ratio: 0.50          # Wall X-position across screen (0.50 = center screen)
+  angular_threshold_deg: 3.0  # Hysteresis angle in degrees around 0° wall plane
+
+  # Robustness Filters
+  min_track_age: 5            # Minimum consecutive frames before track is eligible to count
+  spatial_merge_distance: 90.0 # Pixel threshold to re-link dropped IDs to persistent entity
+
+detection:
+  model_weights: "yolov8n.pt"  # Pretrained COCO model (zero-shot)
+  target_class_id: 0         # 0 = person in COCO dataset
+  conf_thresh: 0.50
+  iou_thresh: 0.45
+  imgsz: 640
+  device: "0"                # GPU index "0" or "cpu"
+
+tracking:
+  track_high_thresh: 0.50
+  track_buffer: 60           # Frames to remember lost tracks
+  match_thresh: 0.80
+
+output:
+  display: true
+  save_video: false
+  save_path: "output/"
+  log_counts: true

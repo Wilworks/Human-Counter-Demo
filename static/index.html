@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WILFRED LABS // VISION TELEMETRY ARCHITECTURE</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <header>
+    <div class="brand">WILFRED LABS // VISION TELEMETRY ARCHITECTURE</div>
+    <div class="status-bar">
+      <div>FPS: <span id="fps-counter" style="color: var(--accent-cyan);">0.0</span></div>
+      <div>RESOLUTION: <span id="res-display" style="color: var(--text-muted);">1280x720</span></div>
+      <div class="status-pill">
+        <div class="status-dot"></div>
+        <span>STREAM ACTIVE</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="video-section">
+      <div class="video-container">
+        <img id="live-stream" src="/video_feed" alt="LIVE STREAM STREAMING">
+      </div>
+    </section>
+
+    <aside class="side-panel">
+      <div class="card">
+        <div class="card-header">
+          <span>PRIMARY INVENTORY METRICS</span>
+          <span id="gate-mode-label">FRONTAL_DEPTH</span>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="metric-value" id="total-count">0</div>
+            <div class="metric-label">TOTAL PASSED</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-value" id="active-count" style="color: var(--text-main);">0</div>
+            <div class="metric-label">ACTIVE TRACKS</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-value" id="count-in" style="color: var(--accent-green);">0</div>
+            <div class="metric-label">COUNT IN</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-value" id="count-out" style="color: var(--text-muted);">0</div>
+            <div class="metric-label">COUNT OUT</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">SYSTEM CONTROL PARAMETERS</div>
+        
+        <div class="control-group">
+          <div class="control-label">GATE MODE</div>
+          <div class="btn-group">
+            <button class="btn active" id="btn-mode-frontal" onclick="setMode('frontal_depth')">FRONTAL DEPTH</button>
+            <button class="btn" id="btn-mode-sideways" onclick="setMode('sideways_wall')">SIDEWAYS WALL</button>
+          </div>
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
+            <span>TARGET DEPTH Z</span>
+            <span class="control-value" id="val-depth">3.5m</span>
+          </div>
+          <input type="range" id="slider-depth" min="1.0" max="8.0" step="0.1" value="3.5" oninput="updateConfig()">
+        </div>
+
+        <div class="control-group">
+          <div class="control-label">
+            <span>RE-ID SIMILARITY THRESHOLD</span>
+            <span class="control-value" id="val-reid">0.75</span>
+          </div>
+          <input type="range" id="slider-reid" min="0.50" max="0.95" step="0.05" value="0.75" oninput="updateConfig()">
+        </div>
+
+        <div class="btn-group" style="margin-top: 16px;">
+          <button class="btn btn-danger" onclick="resetMemory()">RESET MEMORY</button>
+          <button class="btn" onclick="exportLog()">EXPORT CSV LOG</button>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1;">
+        <div class="card-header">SPATIAL TELEMETRY MATRIX</div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>ENTITY</th>
+                <th>TRACKER</th>
+                <th>DEPTH</th>
+                <th>ANGLE</th>
+                <th>STATUS</th>
+              </tr>
+            </thead>
+            <tbody id="telemetry-table-body">
+              <tr>
+                <td colspan="5" style="color: var(--text-muted); text-align: center;">NO ACTIVE TRACKS</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
