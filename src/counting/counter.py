@@ -1,10 +1,13 @@
 """
-counter.py - Physics-Based 3D Gate Engine with Multi-Frame Re-ID & Directional State Lock.
+counter.py - Physics-Based 3D Gate Engine with 3-Zone Hysteresis & Visual Re-ID.
 
-Key Enhancements:
-1. Multi-Frame Feature Accumulation: Averages feature signatures over observation frames to prevent low-res distant crop misclassification.
-2. Directional Return Requirement: A second count in the exit direction REQUIRES observing a reverse crossing (RETURN) first.
-3. Adaptive Cosine Similarity Threshold (0.65 default for robust human/cattle matching).
+Features:
+1. Permanent Entity Count Lock: Once an entity_id is in self.counted_entities, it CANNOT trigger +1 again under any circumstance!
+2. 3-Zone Hysteresis State Machine:
+   - FAR_ZONE: Z > (target_depth + 0.5m) --> State = ARMED_FAR (Ready to count towards camera)
+   - NEAR_ZONE: Z < (target_depth - 0.5m) --> State = PASSED_NEAR
+   - Tracks born inside/near camera start as PASSED_NEAR (cannot trigger false count on spawn).
+3. Pose-Invariant Multi-Template Visual Re-ID Engine.
 """
 
 import math
@@ -19,7 +22,7 @@ console = Console()
 
 
 class HumanCounterPhysics:
-    """Physics-Based 3D Gate Engine with Multi-Frame Re-ID & Directional State Lock."""
+    """Physics-Based 3D Gate Engine with 3-Zone Hysteresis & Visual Re-ID."""
 
     def __init__(
         self,
@@ -34,7 +37,7 @@ class HumanCounterPhysics:
         spatial_merge_distance: float = 90.0,
         reid_similarity_threshold: float = 0.65,
     ):
-        """Initialize engine."""
+        """Initialize engine with 3-Zone Hysteresis & Permanent Entity Lock."""
         self.mode = str(mode).lower()
         self.direction = str(direction).lower()
         self.target_depth_meters = float(target_depth_meters)
@@ -57,8 +60,8 @@ class HumanCounterPhysics:
         self.entity_next_id = 1
         self.counted_entities: Set[int] = set()
 
-        # Directional State Memory: entity_id -> "OUT" / "IN" / "NONE"
-        self.entity_last_direction: Dict[int, str] = {}
+        # 3-Zone State Machine per entity: entity_id -> "FAR" | "NEAR" | "ARMED_FAR" | "ARMED_NEAR" | "PASSED_NEAR" | "PASSED_FAR"
+        self.entity_zone_state: Dict[int, str] = {}
 
         # Pose-Invariant Gallery: entity_id -> List[np.ndarray]
         self.entity_gallery: Dict[int, List[np.ndarray]] = defaultdict(list)
@@ -104,7 +107,6 @@ class HumanCounterPhysics:
             entity_id = self.tracker_to_entity[tracker_id]
             self.recent_lost_entities[entity_id] = (feet_x, feet_y, self.frame_count)
             if feature_vec is not None and len(self.entity_gallery[entity_id]) < 5:
-                # Add sample if sufficiently distinct
                 if not any(self._cosine_similarity(feature_vec, gv) > 0.90 for gv in self.entity_gallery[entity_id]):
                     self.entity_gallery[entity_id].append(feature_vec)
             return entity_id
@@ -138,7 +140,6 @@ class HumanCounterPhysics:
             best_reid_entity = None
             best_sim = -1.0
 
-            # Average similarity across accumulated track features and gallery vectors
             for ent_id, pose_list in self.entity_gallery.items():
                 for gallery_vec in pose_list:
                     for trk_vec in accumulated:
@@ -174,7 +175,7 @@ class HumanCounterPhysics:
         frame_width: int,
         frame_height: int,
     ) -> Dict[str, Any]:
-        """Evaluate physics-based gate crossings with directional state lock."""
+        """Evaluate 3-Zone Hysteresis Gate Crossings with strict Entity Lock."""
         self.frame_count += 1
         wall_x = self.get_wall_x_pixels(frame_width)
         new_counts: List[int] = []
@@ -224,47 +225,76 @@ class HumanCounterPhysics:
             if len(self.track_history_physics[tid]) > 30:
                 self.track_history_physics[tid] = self.track_history_physics[tid][-30:]
 
+            # Require minimum track age before gate evaluation
             if age < self.min_track_age:
                 continue
 
-            if len(self.track_history_physics[tid]) < 2:
+            # -------------------------------------------------------------
+            # LAYER 1: STRICT PERMANENT ENTITY LOCK CHECK
+            # -------------------------------------------------------------
+            # If entity_id is ALREADY in self.counted_entities, it CANNOT count again!
+            if is_counted:
                 continue
 
-            prev_depth, prev_angle = self.track_history_physics[tid][-2]
-            curr_depth, curr_angle = self.track_history_physics[tid][-1]
+            # -------------------------------------------------------------
+            # 3-ZONE HYSTERESIS STATE MACHINE
+            # -------------------------------------------------------------
+            if self.mode == "sideways_wall":
+                far_bound = -5.0   # Left Zone (< -5°)
+                near_bound = +5.0  # Right Zone (> +5°)
+                curr_val = angle_deg
+            else: # frontal_depth
+                far_bound = self.target_depth_meters + 0.50  # e.g. > 4.0m
+                near_bound = self.target_depth_meters - 0.50 # e.g. < 3.0m
+                curr_val = depth_m
 
-            crossed = False
+            # Initial state assignment if entity is brand new
+            if entity_id not in self.entity_zone_state:
+                if self.mode == "sideways_wall":
+                    if curr_val <= far_bound:
+                        self.entity_zone_state[entity_id] = "ARMED_LEFT"
+                    elif curr_val >= near_bound:
+                        self.entity_zone_state[entity_id] = "ARMED_RIGHT"
+                    else:
+                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE" # Spawned inside gate -> locked
+                else: # frontal_depth
+                    if curr_val >= far_bound:
+                        self.entity_zone_state[entity_id] = "ARMED_FAR"
+                    elif curr_val <= near_bound:
+                        self.entity_zone_state[entity_id] = "PASSED_NEAR" # Spawned near camera -> locked
+                    else:
+                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE" # Spawned on gate line -> locked
+
+            current_state = self.entity_zone_state[entity_id]
+
+            # Update State Machine
+            if self.mode == "sideways_wall":
+                if curr_val <= far_bound:
+                    self.entity_zone_state[entity_id] = "ARMED_LEFT"
+                elif curr_val >= near_bound:
+                    self.entity_zone_state[entity_id] = "ARMED_RIGHT"
+            else: # frontal_depth
+                if curr_val >= far_bound: # Depth > 4.0m
+                    self.entity_zone_state[entity_id] = "ARMED_FAR"
+
+            # Evaluate Crossing Event
+            trigger_count = False
             crossing_dir = None
 
-            if self.mode == "sideways_wall":
-                if prev_angle < 0.0 and curr_angle >= 0.0:
-                    crossed = True
-                    crossing_dir = "left_to_right"
-                elif prev_angle > 0.0 and curr_angle <= 0.0:
-                    crossed = True
-                    crossing_dir = "right_to_left"
-            else: # frontal_depth
-                if prev_depth > self.target_depth_meters and curr_depth <= self.target_depth_meters:
-                    crossed = True
+            if self.mode == "frontal_depth":
+                if current_state == "ARMED_FAR" and curr_val <= self.target_depth_meters:
+                    trigger_count = True
                     crossing_dir = "towards_camera"
-                elif prev_depth < self.target_depth_meters and curr_depth >= self.target_depth_meters:
-                    crossed = True
-                    crossing_dir = "away_from_camera"
+                    self.entity_zone_state[entity_id] = "PASSED_NEAR"
+            else: # sideways_wall
+                if current_state == "ARMED_LEFT" and curr_val >= 0.0:
+                    trigger_count = True
+                    crossing_dir = "left_to_right"
+                    self.entity_zone_state[entity_id] = "PASSED_RIGHT"
 
-            # Directional Lock Rule:
-            # If entity has ALREADY been counted for this crossing_dir and HAS NOT crossed back in reverse, REJECT SECOND COUNT!
-            last_dir = self.entity_last_direction.get(entity_id, None)
-
-            if crossed:
-                # Update last direction state
-                self.entity_last_direction[entity_id] = crossing_dir
-
-                if entity_id in self.counted_entities and last_dir == crossing_dir:
-                    # Duplicate same-direction crossing without reverse return -> REJECT!
-                    continue
-
+            # Execute Count if Triggered & Valid Direction
+            if trigger_count:
                 valid_dir = (self.direction == "both") or (self.direction == crossing_dir)
-
                 if valid_dir:
                     self.counted_entities.add(entity_id)
                     self.total_count += 1
@@ -275,7 +305,7 @@ class HumanCounterPhysics:
                     else:
                         self.count_out += 1
 
-                    metric_str = f"Depth={curr_depth}m" if self.mode == "frontal_depth" else f"Angle={curr_angle}°"
+                    metric_str = f"Depth={curr_val}m" if self.mode == "frontal_depth" else f"Angle={curr_val}°"
                     console.print(
                         f"[bold black on bright_green] +1 PASSED GATE [/bold black on bright_green] "
                         f"Entity #{entity_id} (Tracker #{tid}) crossed ({crossing_dir.upper()}, {metric_str})! "
@@ -299,11 +329,11 @@ class HumanCounterPhysics:
         self.counted_entities.clear()
         self.tracker_to_entity.clear()
         self.entity_gallery.clear()
-        self.entity_last_direction.clear()
+        self.entity_zone_state.clear()
         self.track_accumulated_features.clear()
         self.entity_next_id = 1
         self.track_ages.clear()
         self.track_history_physics.clear()
         self.recent_lost_entities.clear()
         self.frame_count = 0
-        console.print("[bold yellow]Physics counter engine & state memory reset.[/bold yellow]")
+        console.print("[bold yellow]Physics counter engine & permanent entity lock memory reset.[/bold yellow]")
