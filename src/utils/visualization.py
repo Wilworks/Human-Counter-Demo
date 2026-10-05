@@ -17,54 +17,19 @@ def draw_physics_virtual_gate(
     human_height_meters: float = 1.75,
     color: tuple = (0, 255, 255),
 ) -> np.ndarray:
-    """Render 3D physical gate boundary (Ground Depth Plane or Vertical Wall Plane)."""
+    """Render clean, minimal gate line across screen."""
     h, w = frame.shape[:2]
-    overlay = frame.copy()
 
     if mode == "sideways_wall":
         x_wall = int(wall_x_ratio * w)
-
-        # Draw Vertical Wall Plane (0° Angle Line)
-        for y_step in range(0, h, 40):
-            cv2.line(overlay, (x_wall - 25, y_step), (x_wall + 25, y_step + 20), color, 1)
-
-        pts = np.array([[x_wall - 30, 0], [x_wall + 30, 0], [x_wall + 30, h], [x_wall - 30, h]], np.int32)
-        cv2.fillPoly(overlay, [pts], color)
-        cv2.addWeighted(overlay, 0.25, frame, 0.75, 0, frame)
-
-        # Center Wall Axis (0.0° Plane)
-        cv2.line(frame, (x_wall, 0), (x_wall, h), (255, 255, 255), 3)
-        cv2.line(frame, (x_wall - 15, 0), (x_wall - 15, h), color, 1)
-        cv2.line(frame, (x_wall + 15, 0), (x_wall + 15, h), color, 1)
-
-        cv2.putText(frame, "WALL GATE", (max(10, x_wall - 60), 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
-
+        # Vertical line
+        cv2.line(frame, (x_wall, 0), (x_wall, h), (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, "GATE (0.0°)", (max(10, x_wall - 50), 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     else:
-        # Frontal Depth Gate Plane: Calculate Y position corresponding to target_depth_meters
-        # h_bbox = (f * H) / Z
-        gate_bbox_h = (focal_length_px * human_height_meters) / target_depth_meters
-        # Map depth to Y coordinate on screen
-        y_gate = int(h * 0.65) # Visual depth line
-
-        # Ground Plane Grid
-        for x_step in range(0, w, 60):
-            cv2.line(overlay, (x_step, y_gate), (int(w / 2 + (x_step - w / 2) * 1.5), h), color, 1)
-
-        pts = np.array([[0, y_gate - 15], [w, y_gate - 15], [w, y_gate + 15], [0, y_gate + 15]], np.int32)
-        cv2.fillPoly(overlay, [pts], color)
-        cv2.addWeighted(overlay, 0.30, frame, 0.70, 0, frame)
-
-        # Baseline
-        cv2.line(frame, (0, y_gate), (w, y_gate), (255, 255, 255), 2)
-        cv2.line(frame, (0, y_gate - 15), (w, y_gate - 15), color, 1)
-        cv2.line(frame, (0, y_gate + 15), (w, y_gate + 15), color, 1)
-
-        # Standing Pillars
-        cv2.line(frame, (40, y_gate), (40, y_gate - 180), color, 3)
-        cv2.line(frame, (w - 40, y_gate), (w - 40, y_gate - 180), color, 3)
-        cv2.line(frame, (40, y_gate - 180), (w - 40, y_gate - 180), color, 2)
-
-        cv2.putText(frame, f"GATE ({target_depth_meters:.1f}m)", (20, max(30, y_gate - 25)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+        # Horizontal gate line at depth threshold
+        y_gate = int(h * 0.65)
+        cv2.line(frame, (0, y_gate), (w, y_gate), (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(frame, f"GATE ({target_depth_meters:.1f}m)", (15, y_gate - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
     return frame
 
@@ -76,57 +41,34 @@ def draw_physics_pointers_and_telemetry(
     mode: str = "frontal_depth",
     wall_x_ratio: float = 0.50,
 ) -> np.ndarray:
-    """Draw persistent laser pointer rays and live distance/angle telemetry badges."""
-    h, w = frame.shape[:2]
-
-    # Camera Origin Anchor Point
-    if mode == "sideways_wall":
-        cam_origin = (int(wall_x_ratio * w), h)
-    else:
-        cam_origin = (int(w / 2), h)
-
+    """Draw clean, sleek bounding boxes and subtle text labels."""
     for tid, data in telemetry.items():
         entity_id = data["entity_id"]
         depth_m = data["depth_m"]
         angle_deg = data["angle_deg"]
-        feet_pt = data["feet_pt"]
         bbox = data["bbox"].astype(int)
 
         is_counted = entity_id in counted_entities
-        color = (0, 255, 0) if is_counted else (255, 165, 0) # Green if passed, Amber if tracking
+        color = (0, 255, 0) if is_counted else (255, 200, 0) # Green if counted, Gold if tracking
 
-        # 1. Bounding Box
+        # 1. Sleek 2px Bounding Box
         cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
 
-        # 2. Feet Anchor Point
-        cv2.circle(frame, feet_pt, 6, (0, 0, 255), -1)
-        cv2.circle(frame, feet_pt, 12, (0, 255, 255), 2)
-
-        # 3. Persistent Laser Pointer Ray (Line tagged from camera anchor to person's feet)
-        cv2.line(frame, cam_origin, feet_pt, color, 2, cv2.LINE_AA)
-        
-        # Ray midpoint distance marker
-        mid_pt = (int((cam_origin[0] + feet_pt[0]) / 2), int((cam_origin[1] + feet_pt[1]) / 2))
-        metric_txt = f"{depth_m}m" if mode == "frontal_depth" else f"{angle_deg}°"
-        cv2.putText(frame, metric_txt, mid_pt, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
-
-        # 4. Live Telemetry Badge Pill above Bounding Box
-        status_tag = " [PASSED]" if is_counted else ""
+        # 2. Minimalist Text Label above box (no block background obscuring face)
+        status_tag = " [COUNTED]" if is_counted else ""
         if mode == "frontal_depth":
-            badge_str = f"Entity #{entity_id} | d = {depth_m}m{status_tag}"
+            badge_str = f"#{entity_id} | {depth_m}m{status_tag}"
         else:
-            badge_str = f"Entity #{entity_id} | angle = {angle_deg}°{status_tag}"
+            badge_str = f"#{entity_id} | {angle_deg}°{status_tag}"
 
-        (w_txt, h_txt), _ = cv2.getTextSize(badge_str, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        cv2.rectangle(frame, (bbox[0], bbox[1] - h_txt - 10), (bbox[0] + w_txt + 10, bbox[1]), color, -1)
         cv2.putText(
             frame,
             badge_str,
-            (bbox[0] + 5, bbox[1] - 5),
+            (bbox[0], max(15, bbox[1] - 8)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 0, 0),
-            2,
+            0.5,
+            color,
+            1,
             cv2.LINE_AA,
         )
 
@@ -144,15 +86,15 @@ def draw_hud_physics(
     target_depth: float,
     tracker_name: str = "bytetrack",
 ) -> np.ndarray:
-    """Draw top HUD telemetry card with minimal metrics."""
+    """Draw sleek semi-transparent HUD overlay."""
     overlay = frame.copy()
-    cv2.rectangle(overlay, (15, 15), (420, 115), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
-    cv2.rectangle(frame, (15, 15), (420, 115), (0, 255, 255), 1)
+    cv2.rectangle(overlay, (15, 15), (380, 100), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.50, frame, 0.50, 0, frame)
+    cv2.rectangle(frame, (15, 15), (380, 100), (80, 80, 80), 1)
 
-    cv2.putText(frame, f"COUNT: {total_count}  (IN: {count_in} | OUT: {count_out})", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"MODE: {mode.upper()} | GATE: {target_depth:.1f}m", (25, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"ACTIVE: {active_tracks} | FPS: {fps:.1f} | TRACKER: {tracker_name.upper()}", (25, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"COUNT: {total_count}  (IN: {count_in} | OUT: {count_out})", (25, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f"MODE: {mode.upper()} | GATE: {target_depth:.1f}m", (25, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"ACTIVE: {active_tracks} | FPS: {fps:.1f} | TRACKER: {tracker_name.upper()}", (25, 88), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
 
     return frame
 
@@ -160,7 +102,7 @@ def draw_hud_physics(
 def draw_new_count_flash_physics(frame: np.ndarray, new_entities: List[int]) -> np.ndarray:
     """Flash border accent on frame when a new entity crossing occurs."""
     h, w = frame.shape[:2]
-    cv2.rectangle(frame, (0, 0), (w, h), (0, 255, 0), 10)
-    msg = f"PASSED GATE: Entity #{','.join(map(str, new_entities))}"
-    cv2.putText(frame, msg, (int(w / 2) - 200, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 0), 3, cv2.LINE_AA)
+    cv2.rectangle(frame, (0, 0), (w, h), (0, 255, 0), 6)
+    msg = f"COUNT +1: Entity #{','.join(map(str, new_entities))}"
+    cv2.putText(frame, msg, (int(w / 2) - 150, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2, cv2.LINE_AA)
     return frame
