@@ -73,6 +73,7 @@ class HumanCountingPipeline:
             angular_threshold_deg=phys_cfg.get("angular_threshold_deg", 3.0),
             min_track_age=phys_cfg.get("min_track_age", 5),
             spatial_merge_distance=phys_cfg.get("spatial_merge_distance", 90.0),
+            reid_similarity_threshold=phys_cfg.get("reid_similarity_threshold", 0.65),
         )
 
         self.display = out_cfg.get("display", True)

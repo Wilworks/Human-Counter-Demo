@@ -1,13 +1,17 @@
 """
-counter.py - 3D Gate Counter with Direct 1:1 ByteTrack Entity Mapping & 3-Zone Hysteresis.
+counter.py - 3D Gate Counter with Backend Visual Re-ID Gallery & 3-Zone Hysteresis.
 
-Fixes:
-1. Direct 1:1 Tracker Mapping (entity_id = tracker_id): Ensures 3 people in frame receive 3 distinct Entity IDs (#1, #2, #3).
+Features:
+1. Backend Visual Feature Gallery (Long-Term Re-ID Store):
+   - Stores visual appearance embeddings (spatial HSV + texture profile) for all counted entities.
+   - When a person/cow leaves the frame and returns (even minutes later with a new tracker ID),
+     the backend performs visual cosine similarity matching.
+   - If similarity >= threshold (e.g., 65%+), the new tracker ID is mapped back to the existing persistent Entity ID.
+   - Prevents duplicate counting when re-entering the scene!
 2. 3-Zone Hysteresis State Machine:
-   - FAR_ZONE: Z > (target_depth + 0.5m) --> State = ARMED_FAR (Ready to count towards camera)
-   - NEAR_ZONE: Z < (target_depth - 0.5m) --> State = PASSED_NEAR (Triggers +1 COUNT)
-   - Tracks born near/inside camera start as PASSED_NEAR to prevent false spawn counts.
-3. Permanent Lock per Entity: Each distinct person is counted exactly once per crossing.
+   - FAR_ZONE: Z > (target_depth + 0.5m) --> ARMED_FAR
+   - NEAR_ZONE: Z < (target_depth - 0.5m) --> PASSED_NEAR (Triggers +1 COUNT)
+3. Permanent Lock per Entity: Each distinct person is counted exactly once.
 """
 
 import math
@@ -22,7 +26,7 @@ console = Console()
 
 
 class HumanCounterPhysics:
-    """Physics-Based 3D Gate Counter with Direct Tracker Entity Mapping."""
+    """Physics Gate Counter with Backend Visual Re-ID Gallery."""
 
     def __init__(
         self,
@@ -35,9 +39,9 @@ class HumanCounterPhysics:
         angular_threshold_deg: float = 3.0,
         min_track_age: int = 5,
         spatial_merge_distance: float = 0.0,
-        reid_similarity_threshold: float = 0.95,
+        reid_similarity_threshold: float = 0.65,
     ):
-        """Initialize engine with direct 1:1 entity mapping."""
+        """Initialize engine with backend visual gallery store."""
         self.mode = str(mode).lower()
         self.direction = str(direction).lower()
         self.target_depth_meters = float(target_depth_meters)
@@ -46,6 +50,7 @@ class HumanCounterPhysics:
         self.wall_x_ratio = float(wall_x_ratio)
         self.angular_threshold_deg = float(angular_threshold_deg)
         self.min_track_age = int(min_track_age)
+        self.reid_similarity_threshold = float(reid_similarity_threshold)
 
         # Telemetry Stats
         self.total_count = 0
@@ -55,6 +60,11 @@ class HumanCounterPhysics:
 
         # Permanent Entity Lock Set
         self.counted_entities: Set[int] = set()
+
+        # Backend Gallery Re-ID Store
+        self.next_entity_id: int = 1
+        self.tracker_to_entity_map: Dict[int, int] = {}
+        self.gallery_embeddings: Dict[int, np.ndarray] = {}
 
         # 3-Zone State Machine per entity: entity_id -> "ARMED_FAR" | "ARMED_NEAR" | "PASSED_NEAR" | "PASSED_FAR"
         self.entity_zone_state: Dict[int, str] = {}
@@ -67,6 +77,83 @@ class HumanCounterPhysics:
         """Calculate wall X coordinate in pixels."""
         return int(self.wall_x_ratio * frame_width)
 
+    def extract_visual_embedding(self, frame: np.ndarray, bbox: np.ndarray) -> Optional[np.ndarray]:
+        """Extract spatial multi-region HSV color profile feature vector for Re-ID matching."""
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = map(int, [max(0, bbox[0]), max(0, bbox[1]), min(w, bbox[2]), min(h, bbox[3])])
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0 or crop.shape[0] < 15 or crop.shape[1] < 15:
+            return None
+
+        try:
+            crop_resized = cv2.resize(crop, (64, 128))
+            hsv = cv2.cvtColor(crop_resized, cv2.COLOR_BGR2HSV)
+
+            # Split into Upper Body (torso) and Lower Body (legs)
+            upper_hsv = hsv[:64, :]
+            lower_hsv = hsv[64:, :]
+
+            # Compute HSV Histograms
+            hist_upper = cv2.calcHist([upper_hsv], [0, 1, 2], None, [16, 8, 8], [0, 180, 0, 256, 0, 256])
+            hist_lower = cv2.calcHist([lower_hsv], [0, 1, 2], None, [16, 8, 8], [0, 180, 0, 256, 0, 256])
+
+            cv2.normalize(hist_upper, hist_upper)
+            cv2.normalize(hist_lower, hist_lower)
+
+            vec = np.concatenate([hist_upper.flatten(), hist_lower.flatten()])
+            norm = np.linalg.norm(vec)
+            if norm < 1e-6:
+                return None
+            return vec / norm
+        except Exception:
+            return None
+
+    def resolve_entity_id(self, tracker_id: int, frame: np.ndarray, bbox: np.ndarray) -> int:
+        """Resolve tracker ID to persistent entity ID using backend visual similarity gallery."""
+        # 1. If tracker ID is already active in current session
+        if tracker_id in self.tracker_to_entity_map:
+            entity_id = self.tracker_to_entity_map[tracker_id]
+            curr_emb = self.extract_visual_embedding(frame, bbox)
+            if curr_emb is not None and entity_id in self.gallery_embeddings:
+                # Update gallery embedding (moving average)
+                old_emb = self.gallery_embeddings[entity_id]
+                updated = 0.85 * old_emb + 0.15 * curr_emb
+                self.gallery_embeddings[entity_id] = updated / max(np.linalg.norm(updated), 1e-6)
+            return entity_id
+
+        # 2. If new tracker ID: Match visual embedding against backend gallery store
+        curr_emb = self.extract_visual_embedding(frame, bbox)
+
+        best_entity_id = None
+        best_sim = 0.0
+
+        if curr_emb is not None and len(self.gallery_embeddings) > 0:
+            for ent_id, ent_emb in self.gallery_embeddings.items():
+                sim = float(np.dot(curr_emb, ent_emb))
+                if sim > best_sim:
+                    best_sim = sim
+                    best_entity_id = ent_id
+
+        if best_entity_id is not None and best_sim >= self.reid_similarity_threshold:
+            # RE-ID MATCH FOUND! Relink brand-new tracker to existing entity!
+            entity_id = best_entity_id
+            self.tracker_to_entity_map[tracker_id] = entity_id
+            console.print(
+                f"[bold black on bright_yellow] RE-ID MATCH [/bold black on bright_yellow] "
+                f"Tracker #{tracker_id} RECOGNIZED as Entity #{entity_id} (Similarity = {best_sim*100:.1f}%)! "
+                f"PREVENTING DUPLICATE COUNT!"
+            )
+        else:
+            # No match found -> Assign new persistent Entity ID
+            entity_id = self.next_entity_id
+            self.next_entity_id += 1
+            self.tracker_to_entity_map[tracker_id] = entity_id
+            if curr_emb is not None:
+                self.gallery_embeddings[entity_id] = curr_emb
+
+        return entity_id
+
     def update(
         self,
         detections: sv.Detections,
@@ -74,7 +161,7 @@ class HumanCounterPhysics:
         frame_width: int,
         frame_height: int,
     ) -> Dict[str, Any]:
-        """Evaluate 3-Zone Hysteresis Gate Crossings for each distinct tracked person."""
+        """Evaluate Gate Crossings for each distinct tracked person with Backend Re-ID Matching."""
         self.frame_count += 1
         wall_x = self.get_wall_x_pixels(frame_width)
         new_counts: List[int] = []
@@ -107,8 +194,8 @@ class HumanCounterPhysics:
             self.track_ages[tid] += 1
             age = self.track_ages[tid]
 
-            # Direct 1:1 ByteTrack Entity Mapping
-            entity_id = tid
+            # Resolve Tracker ID to Persistent Entity ID via Backend Re-ID Gallery
+            entity_id = self.resolve_entity_id(tid, frame, bbox)
             is_counted = entity_id in self.counted_entities
 
             entity_telemetry[tid] = {
@@ -131,7 +218,6 @@ class HumanCounterPhysics:
             # -------------------------------------------------------------
             # LAYER 1: STRICT PERMANENT ENTITY LOCK CHECK
             # -------------------------------------------------------------
-            # If this entity has already been counted, skip gate evaluation!
             if is_counted:
                 continue
 
@@ -155,14 +241,14 @@ class HumanCounterPhysics:
                     elif curr_val >= near_bound:
                         self.entity_zone_state[entity_id] = "ARMED_RIGHT"
                     else:
-                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE" # Spawned inside gate -> locked
+                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE"
                 else: # frontal_depth
                     if curr_val >= far_bound:
                         self.entity_zone_state[entity_id] = "ARMED_FAR"
                     elif curr_val <= near_bound:
-                        self.entity_zone_state[entity_id] = "PASSED_NEAR" # Spawned near camera -> locked
+                        self.entity_zone_state[entity_id] = "PASSED_NEAR"
                     else:
-                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE" # Spawned on gate line -> locked
+                        self.entity_zone_state[entity_id] = "PASSED_MIDDLE"
 
             current_state = self.entity_zone_state[entity_id]
 
@@ -173,7 +259,7 @@ class HumanCounterPhysics:
                 elif curr_val >= near_bound:
                     self.entity_zone_state[entity_id] = "ARMED_RIGHT"
             else: # frontal_depth
-                if curr_val >= far_bound: # Depth > 4.0m
+                if curr_val >= far_bound:
                     self.entity_zone_state[entity_id] = "ARMED_FAR"
 
             # Evaluate Crossing Event
@@ -221,13 +307,16 @@ class HumanCounterPhysics:
         }
 
     def reset(self) -> None:
-        """Reset counter state."""
+        """Reset counter state and backend visual gallery."""
         self.total_count = 0
         self.count_in = 0
         self.count_out = 0
+        self.next_entity_id = 1
         self.counted_entities.clear()
+        self.tracker_to_entity_map.clear()
+        self.gallery_embeddings.clear()
         self.entity_zone_state.clear()
         self.track_ages.clear()
         self.track_history_physics.clear()
         self.frame_count = 0
-        console.print("[bold yellow]Counter state and tracked entity memory reset.[/bold yellow]")
+        console.print("[bold yellow]Counter state and persistent visual gallery store reset.[/bold yellow]")

@@ -25,6 +25,7 @@ physics_gate:
   # Robustness Filters
   min_track_age: 5            # Minimum consecutive frames before track is eligible to count
   spatial_merge_distance: 90.0 # Pixel threshold to re-link dropped IDs to persistent entity
+  reid_similarity_threshold: 0.65 # Cosine similarity threshold to recognize returning entities
 
 detection:
   model_weights: "yolov8n.pt"  # Pretrained COCO model (zero-shot)
