@@ -79,6 +79,7 @@ def init_pipeline():
     )
 
     pipeline_state["tracker"] = HumanTracker(
+        algorithm=trk_cfg.get("algorithm", "bytetrack"),
         track_activation_threshold=trk_cfg.get("track_high_thresh", 0.50),
         lost_track_buffer=trk_cfg.get("track_buffer", 60),
         minimum_matching_threshold=trk_cfg.get("match_thresh", 0.80),
@@ -128,11 +129,12 @@ def generate_frames():
         t0 = time.time()
         frame_height, frame_width = frame.shape[:2]
 
-        # Stage 1: Detection
-        detections = detector.detect_supervision(frame)
-
-        # Stage 2: Tracking
-        tracked = tracker.update(detections)
+        # Stage 1 & 2: Detection & Tracking
+        if tracker.algorithm == "botsort":
+            tracked = tracker.update(None, detector=detector, frame=frame)
+        else:
+            detections = detector.detect_supervision(frame)
+            tracked = tracker.update(detections)
 
         # Stage 3: Physics Gate Engine with Multi-Frame Re-ID & Directional State Lock
         count_res = counter.update(tracked, frame, frame_width, frame_height)
@@ -168,6 +170,7 @@ def generate_frames():
             fps_calc,
             counter.mode,
             counter.target_depth_meters,
+            tracker.algorithm,
         )
 
         if count_res["new_counts"]:

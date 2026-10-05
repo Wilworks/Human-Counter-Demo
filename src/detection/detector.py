@@ -70,3 +70,21 @@ class HumanDetector:
         )[0]
 
         return sv.Detections.from_ultralytics(results)
+
+    def track_supervision(self, frame: np.ndarray, tracker_type: str = "botsort.yaml"):
+        """Run YOLOv8 object detection + native tracker (e.g. BoT-SORT / DeepSORT with Re-ID embeddings)."""
+        import supervision as sv
+
+        results = self.model.track(
+            frame,
+            conf=self.conf_thresh,
+            iou=self.iou_thresh,
+            imgsz=self.imgsz,
+            device=self.device,
+            classes=[self.target_class_id],
+            tracker=tracker_type,
+            persist=True,
+            verbose=False,
+        )[0]
+
+        return sv.Detections.from_ultralytics(results)

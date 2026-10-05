@@ -142,19 +142,20 @@ def draw_hud_physics(
     fps: float,
     mode: str,
     target_depth: float,
+    tracker_name: str = "bytetrack",
 ) -> np.ndarray:
     """Draw top HUD telemetry card with physics metrics."""
     overlay = frame.copy()
-    cv2.rectangle(overlay, (15, 15), (420, 135), (20, 20, 20), -1)
+    cv2.rectangle(overlay, (15, 15), (450, 135), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
-    cv2.rectangle(frame, (15, 15), (420, 135), (0, 255, 255), 1)
+    cv2.rectangle(frame, (15, 15), (450, 135), (0, 255, 255), 1)
 
     mode_label = f"FRONTAL (Gate Z={target_depth:.1f}m)" if mode == "frontal_depth" else "SIDEWAYS (Gate Angle=0.0 deg)"
 
     cv2.putText(frame, f"WILFRED'S LAB - 3D PHYSICS GATE", (25, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
     cv2.putText(frame, f"TOTAL PASSED: {total_count}", (25, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
     cv2.putText(frame, f"IN: {count_in}  |  OUT: {count_out}  |  MODE: {mode.upper()}", (25, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"ACTIVE PERSONS: {active_tracks}  |  FPS: {fps:.1f}", (25, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"ACTIVE: {active_tracks}  |  FPS: {fps:.1f}  |  TRK: {tracker_name.upper()}", (25, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     return frame
 

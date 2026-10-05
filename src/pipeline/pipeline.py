@@ -56,6 +56,7 @@ class HumanCountingPipeline:
         )
 
         self.tracker = HumanTracker(
+            algorithm=trk_cfg.get("algorithm", "bytetrack"),
             track_activation_threshold=trk_cfg.get("track_high_thresh", 0.50),
             lost_track_buffer=trk_cfg.get("track_buffer", 60),
             minimum_matching_threshold=trk_cfg.get("match_thresh", 0.80),
@@ -125,6 +126,7 @@ class HumanCountingPipeline:
             "   - Press [bold white]'q'[/bold white] to stop pipeline & print session summary card\n"
             "   - Press [bold white]'r'[/bold white] to reset virtual line counter & ID history\n"
             "   - Press [bold white]'m'[/bold white] to toggle Gate Mode (frontal_depth <-> sideways_wall)\n"
+            "   - Press [bold white]'t'[/bold white] to toggle Tracker Algorithm (bytetrack <-> botsort)\n"
             "   - Press [bold white]'f'[/bold white] to toggle Fullscreen mode",
             border_style="bright_magenta",
             title="[bold bright_magenta] WILFRED'S LAB STREAM ACTIVE [/bold bright_magenta]",
@@ -140,11 +142,12 @@ class HumanCountingPipeline:
                 frame_count += 1
                 t0 = time.time()
 
-                # Stage 1: Detection
-                detections = self.detector.detect_supervision(frame)
-
-                # Stage 2: Tracking
-                tracked = self.tracker.update(detections)
+                # Stage 1 & 2: Detection and Tracking
+                if self.tracker.algorithm == "botsort":
+                    tracked = self.tracker.update(None, detector=self.detector, frame=frame)
+                else:
+                    detections = self.detector.detect_supervision(frame)
+                    tracked = self.tracker.update(detections)
 
                 # Stage 3: Physics Gate Engine with Visual Re-ID
                 count_res = self.counter.update(tracked, frame, frame_width, frame_height)
@@ -182,6 +185,7 @@ class HumanCountingPipeline:
                         fps_calc,
                         self.counter.mode,
                         self.counter.target_depth_meters,
+                        self.tracker.algorithm,
                     )
 
                     if count_res["new_counts"]:
@@ -202,6 +206,16 @@ class HumanCountingPipeline:
                         elif key == ord("m"):
                             self.counter.mode = "sideways_wall" if self.counter.mode == "frontal_depth" else "frontal_depth"
                             console.print(f"[bold cyan]Toggled Gate Mode to:[/bold cyan] [bold yellow]{self.counter.mode.upper()}[/bold yellow]")
+                        elif key == ord("t"):
+                            new_algo = "botsort" if self.tracker.algorithm == "bytetrack" else "bytetrack"
+                            self.tracker = HumanTracker(
+                                algorithm=new_algo,
+                                track_activation_threshold=self.config.get("tracking", {}).get("track_high_thresh", 0.50),
+                                lost_track_buffer=self.config.get("tracking", {}).get("track_buffer", 60),
+                                minimum_matching_threshold=self.config.get("tracking", {}).get("match_thresh", 0.80),
+                                frame_rate=self.config.get("source", {}).get("fps", 30),
+                            )
+                            console.print(f"[bold cyan]Toggled Tracker to:[/bold cyan] [bold yellow]{new_algo.upper()}[/bold yellow]")
                         elif key == ord("f"):
                             self.fullscreen = not self.fullscreen
                             val = cv2.WINDOW_FULLSCREEN if self.fullscreen else cv2.WINDOW_NORMAL
