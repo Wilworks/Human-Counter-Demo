@@ -101,16 +101,16 @@ class HumanCountingPipeline:
         fps_source = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
         console.print(f"[dim]Stream Specs: {frame_width}x{frame_height} @ {fps_source:.1f} FPS[/dim]")
-        console.print(f"[bold green]3D Physics Gate:[/bold green] Mode={self.counter.mode.upper()} | Gate Z={self.counter.target_depth_meters}m | Dir={self.counter.direction.upper()}\n")
+        console.print(f"[bold green]Gate Config:[/bold green] Mode={self.counter.mode.upper()} | Gate Z={self.counter.target_depth_meters}m | Dir={self.counter.direction.upper()}\n")
 
         writer = None
         if self.save_video:
             os.makedirs(self.save_path, exist_ok=True)
-            out_file = os.path.join(self.save_path, "human_physics_demo_output.mp4")
+            out_file = os.path.join(self.save_path, "human_counter_output.mp4")
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(out_file, fourcc, fps_source, (frame_width, frame_height))
 
-        window_name = "Wilfred's Lab - 3D Human Counter (Physics Mode)"
+        window_name = "Human Counter"
         if self.display:
             cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
             if self.fullscreen:
@@ -121,15 +121,15 @@ class HumanCountingPipeline:
         fps_calc = 0.0
 
         console.print(Panel(
-            "[bold bright_white]3D PHYSICS HUMAN COUNTER PIPELINE RUNNING[/bold bright_white]\n\n"
-            "  [bold green]Interactive Lab Controls:[/bold green]\n"
+            "[bold bright_white]HUMAN COUNTER PIPELINE ACTIVE[/bold bright_white]\n\n"
+            "  [bold green]Controls:[/bold green]\n"
             "   - Press [bold white]'q'[/bold white] to stop pipeline & print session summary card\n"
             "   - Press [bold white]'r'[/bold white] to reset virtual line counter & ID history\n"
             "   - Press [bold white]'m'[/bold white] to toggle Gate Mode (frontal_depth <-> sideways_wall)\n"
             "   - Press [bold white]'t'[/bold white] to toggle Tracker Algorithm (bytetrack <-> botsort)\n"
             "   - Press [bold white]'f'[/bold white] to toggle Fullscreen mode",
             border_style="bright_magenta",
-            title="[bold bright_magenta] WILFRED'S LAB STREAM ACTIVE [/bold bright_magenta]",
+            title="[bold bright_magenta] STREAM ACTIVE [/bold bright_magenta]",
             box=box.DOUBLE_EDGE,
         ))
 
@@ -243,7 +243,7 @@ class HumanCountingPipeline:
         # Final Telemetry Summary Card
         console.print("\n")
         console.print(Panel(
-            f"[bold bright_white]Wilfred's Lab - Physics Gate Results[/bold bright_white]\n\n"
+            f"[bold bright_white]Human Counter - Session Results[/bold bright_white]\n\n"
             f"  [bold cyan]Total Humans Counted:[/bold cyan]  [bold bright_green]{self.counter.total_count}[/bold bright_green] (IN: {self.counter.count_in} | OUT: {self.counter.count_out})\n"
             f"  [bold cyan]Total Frames Processed:[/bold cyan] {frame_count}\n"
             f"  [bold cyan]Elapsed Session Time:[/bold cyan]   {elapsed:.2f}s\n"

@@ -29,7 +29,7 @@ def display_hero_banner():
         "[bold bright_cyan]Zero-Shot Human Detection + ByteTrack + 3-Layer Anti-Double-Count Gate[/bold bright_cyan]\n"
         "[dim]Proof-of-Concept Pipeline for Lab Verification & Real-Time Telemetry[/dim]",
         border_style="bright_cyan",
-        title="[bold bright_cyan]WILFRED'S LAB DEMO[/bold bright_cyan]",
+        title="[bold bright_cyan]HUMAN COUNTER DEMO[/bold bright_cyan]",
         box=box.DOUBLE_EDGE,
     ))
 

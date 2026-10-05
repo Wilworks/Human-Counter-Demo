@@ -41,7 +41,6 @@ class HumanDetector:
             self.device = device
 
         console.print(Panel(
-            f"[bold bright_white]Human Detector Zoo Architecture[/bold bright_white]\n"
             f"  [cyan]Weights Source:[/cyan]   [bold yellow]{weights_path}[/bold yellow] (COCO Pretrained)\n"
             f"  [cyan]Target Class:[/cyan]     [bold white]ID {target_class_id} (person)[/bold white]\n"
             f"  [cyan]Inference Dev:[/cyan]    [bold green]{self.device.upper()}[/bold green] | Conf: {conf_thresh} | IoU: {iou_thresh}\n"

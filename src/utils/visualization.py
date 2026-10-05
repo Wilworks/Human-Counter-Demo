@@ -37,7 +37,7 @@ def draw_physics_virtual_gate(
         cv2.line(frame, (x_wall - 15, 0), (x_wall - 15, h), color, 1)
         cv2.line(frame, (x_wall + 15, 0), (x_wall + 15, h), color, 1)
 
-        cv2.putText(frame, f"VERTICAL WALL GATE (0.0 deg Plane)", (max(10, x_wall - 140), 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+        cv2.putText(frame, "WALL GATE", (max(10, x_wall - 60), 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     else:
         # Frontal Depth Gate Plane: Calculate Y position corresponding to target_depth_meters
@@ -64,7 +64,7 @@ def draw_physics_virtual_gate(
         cv2.line(frame, (w - 40, y_gate), (w - 40, y_gate - 180), color, 3)
         cv2.line(frame, (40, y_gate - 180), (w - 40, y_gate - 180), color, 2)
 
-        cv2.putText(frame, f"3D DEPTH GATE (Target Z = {target_depth_meters:.1f}m)", (20, max(30, y_gate - 25)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+        cv2.putText(frame, f"GATE ({target_depth_meters:.1f}m)", (20, max(30, y_gate - 25)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     return frame
 
@@ -144,18 +144,15 @@ def draw_hud_physics(
     target_depth: float,
     tracker_name: str = "bytetrack",
 ) -> np.ndarray:
-    """Draw top HUD telemetry card with physics metrics."""
+    """Draw top HUD telemetry card with minimal metrics."""
     overlay = frame.copy()
-    cv2.rectangle(overlay, (15, 15), (450, 135), (20, 20, 20), -1)
+    cv2.rectangle(overlay, (15, 15), (420, 115), (20, 20, 20), -1)
     cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
-    cv2.rectangle(frame, (15, 15), (450, 135), (0, 255, 255), 1)
+    cv2.rectangle(frame, (15, 15), (420, 115), (0, 255, 255), 1)
 
-    mode_label = f"FRONTAL (Gate Z={target_depth:.1f}m)" if mode == "frontal_depth" else "SIDEWAYS (Gate Angle=0.0 deg)"
-
-    cv2.putText(frame, f"WILFRED'S LAB - 3D PHYSICS GATE", (25, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"TOTAL PASSED: {total_count}", (25, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(frame, f"IN: {count_in}  |  OUT: {count_out}  |  MODE: {mode.upper()}", (25, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"ACTIVE: {active_tracks}  |  FPS: {fps:.1f}  |  TRK: {tracker_name.upper()}", (25, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"COUNT: {total_count}  (IN: {count_in} | OUT: {count_out})", (25, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(frame, f"MODE: {mode.upper()} | GATE: {target_depth:.1f}m", (25, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"ACTIVE: {active_tracks} | FPS: {fps:.1f} | TRACKER: {tracker_name.upper()}", (25, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
 
     return frame
 

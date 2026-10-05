@@ -247,6 +247,6 @@ def download_output(filename):
 
 if __name__ == "__main__":
     init_pipeline()
-    console.print("\n[bold black on bright_green] WILFRED LABS WEB SERVER RUNNING [/bold black on bright_green]")
+    console.print("\n[bold black on bright_green] WEB SERVER RUNNING [/bold black on bright_green]")
     console.print("[bold cyan]Access Dashboard at:[/bold cyan] [bold yellow]http://localhost:5000[/bold yellow]\n")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
