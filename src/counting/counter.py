@@ -1,13 +1,13 @@
 """
-counter.py - Physics-Based 3D Gate Engine with 3-Zone Hysteresis & Visual Re-ID.
+counter.py - 3D Gate Counter with Direct 1:1 ByteTrack Entity Mapping & 3-Zone Hysteresis.
 
-Features:
-1. Permanent Entity Count Lock: Once an entity_id is in self.counted_entities, it CANNOT trigger +1 again under any circumstance!
+Fixes:
+1. Direct 1:1 Tracker Mapping (entity_id = tracker_id): Ensures 3 people in frame receive 3 distinct Entity IDs (#1, #2, #3).
 2. 3-Zone Hysteresis State Machine:
    - FAR_ZONE: Z > (target_depth + 0.5m) --> State = ARMED_FAR (Ready to count towards camera)
-   - NEAR_ZONE: Z < (target_depth - 0.5m) --> State = PASSED_NEAR
-   - Tracks born inside/near camera start as PASSED_NEAR (cannot trigger false count on spawn).
-3. Pose-Invariant Multi-Template Visual Re-ID Engine.
+   - NEAR_ZONE: Z < (target_depth - 0.5m) --> State = PASSED_NEAR (Triggers +1 COUNT)
+   - Tracks born near/inside camera start as PASSED_NEAR to prevent false spawn counts.
+3. Permanent Lock per Entity: Each distinct person is counted exactly once per crossing.
 """
 
 import math
@@ -22,7 +22,7 @@ console = Console()
 
 
 class HumanCounterPhysics:
-    """Physics-Based 3D Gate Engine with 3-Zone Hysteresis & Visual Re-ID."""
+    """Physics-Based 3D Gate Counter with Direct Tracker Entity Mapping."""
 
     def __init__(
         self,
@@ -34,10 +34,10 @@ class HumanCounterPhysics:
         wall_x_ratio: float = 0.50,
         angular_threshold_deg: float = 3.0,
         min_track_age: int = 5,
-        spatial_merge_distance: float = 90.0,
-        reid_similarity_threshold: float = 0.65,
+        spatial_merge_distance: float = 0.0,
+        reid_similarity_threshold: float = 0.95,
     ):
-        """Initialize engine with 3-Zone Hysteresis & Permanent Entity Lock."""
+        """Initialize engine with direct 1:1 entity mapping."""
         self.mode = str(mode).lower()
         self.direction = str(direction).lower()
         self.target_depth_meters = float(target_depth_meters)
@@ -46,8 +46,6 @@ class HumanCounterPhysics:
         self.wall_x_ratio = float(wall_x_ratio)
         self.angular_threshold_deg = float(angular_threshold_deg)
         self.min_track_age = int(min_track_age)
-        self.spatial_merge_distance = float(spatial_merge_distance)
-        self.reid_similarity_threshold = float(reid_similarity_threshold)
 
         # Telemetry Stats
         self.total_count = 0
@@ -55,118 +53,19 @@ class HumanCounterPhysics:
         self.count_out = 0
         self.frame_count = 0
 
-        # Entity Linkage Memory
-        self.tracker_to_entity: Dict[int, int] = {}
-        self.entity_next_id = 1
+        # Permanent Entity Lock Set
         self.counted_entities: Set[int] = set()
 
-        # 3-Zone State Machine per entity: entity_id -> "FAR" | "NEAR" | "ARMED_FAR" | "ARMED_NEAR" | "PASSED_NEAR" | "PASSED_FAR"
+        # 3-Zone State Machine per entity: entity_id -> "ARMED_FAR" | "ARMED_NEAR" | "PASSED_NEAR" | "PASSED_FAR"
         self.entity_zone_state: Dict[int, str] = {}
-
-        # Pose-Invariant Gallery: entity_id -> List[np.ndarray]
-        self.entity_gallery: Dict[int, List[np.ndarray]] = defaultdict(list)
 
         # Track State Storage
         self.track_ages: Dict[int, int] = defaultdict(int)
         self.track_history_physics: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
-        self.track_accumulated_features: Dict[int, List[np.ndarray]] = defaultdict(list)
-        self.recent_lost_entities: Dict[int, Tuple[float, float, int]] = {}
 
     def get_wall_x_pixels(self, frame_width: int) -> int:
         """Calculate wall X coordinate in pixels."""
         return int(self.wall_x_ratio * frame_width)
-
-    def extract_visual_signature(self, frame: np.ndarray, bbox: np.ndarray) -> Optional[np.ndarray]:
-        """Extract normalized HSV color histogram feature vector from bbox crop."""
-        h, w = frame.shape[:2]
-        x1, y1, x2, y2 = max(0, int(bbox[0])), max(0, int(bbox[1])), min(w, int(bbox[2])), min(h, int(bbox[3]))
-
-        if (x2 - x1) < 10 or (y2 - y1) < 10:
-            return None
-
-        crop = frame[y1:y2, x1:x2]
-        hsv_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-
-        hist = cv2.calcHist([hsv_crop], [0, 1, 2], None, [16, 8, 8], [0, 180, 0, 256, 0, 256])
-        vec = hist.flatten()
-
-        norm = np.linalg.norm(vec)
-        if norm > 1e-6:
-            vec = vec / norm
-
-        return vec
-
-    def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
-        """Compute cosine similarity."""
-        return float(np.dot(vec1, vec2))
-
-    def _resolve_entity(self, tracker_id: int, feet_x: float, feet_y: float, feature_vec: Optional[np.ndarray]) -> int:
-        """Map tracker_id to persistent entity_id using Spatial Memory + Multi-Frame Re-ID."""
-        # 1. Direct Tracker Memory
-        if tracker_id in self.tracker_to_entity:
-            entity_id = self.tracker_to_entity[tracker_id]
-            self.recent_lost_entities[entity_id] = (feet_x, feet_y, self.frame_count)
-            if feature_vec is not None and len(self.entity_gallery[entity_id]) < 5:
-                if not any(self._cosine_similarity(feature_vec, gv) > 0.90 for gv in self.entity_gallery[entity_id]):
-                    self.entity_gallery[entity_id].append(feature_vec)
-            return entity_id
-
-        # Accumulate feature vector
-        if feature_vec is not None:
-            self.track_accumulated_features[tracker_id].append(feature_vec)
-            if len(self.track_accumulated_features[tracker_id]) > 10:
-                self.track_accumulated_features[tracker_id] = self.track_accumulated_features[tracker_id][-10:]
-
-        # 2. Short-Term Spatial Proximity Re-Link (for brief dropouts)
-        best_spatial_entity = None
-        best_dist = float("inf")
-
-        for ent_id, (lx, ly, lframe) in list(self.recent_lost_entities.items()):
-            if self.frame_count - lframe <= 60:
-                dist = math.hypot(feet_x - lx, feet_y - ly)
-                if dist <= self.spatial_merge_distance and dist < best_dist:
-                    best_dist = dist
-                    best_spatial_entity = ent_id
-
-        if best_spatial_entity is not None:
-            self.tracker_to_entity[tracker_id] = best_spatial_entity
-            self.recent_lost_entities[best_spatial_entity] = (feet_x, feet_y, self.frame_count)
-            console.print(f"[bold yellow]Spatial Re-link:[bold yellow] Tracker #{tracker_id} -> Entity #{best_spatial_entity} (Dist={best_dist:.1f}px)")
-            return best_spatial_entity
-
-        # 3. Multi-Frame Visual Cosine Similarity Re-ID Match
-        accumulated = self.track_accumulated_features[tracker_id]
-        if len(accumulated) > 0 and len(self.entity_gallery) > 0:
-            best_reid_entity = None
-            best_sim = -1.0
-
-            for ent_id, pose_list in self.entity_gallery.items():
-                for gallery_vec in pose_list:
-                    for trk_vec in accumulated:
-                        sim = self._cosine_similarity(trk_vec, gallery_vec)
-                        if sim >= self.reid_similarity_threshold and sim > best_sim:
-                            best_sim = sim
-                            best_reid_entity = ent_id
-
-            if best_reid_entity is not None:
-                self.tracker_to_entity[tracker_id] = best_reid_entity
-                self.recent_lost_entities[best_reid_entity] = (feet_x, feet_y, self.frame_count)
-                console.print(
-                    f"[bold black on bright_green] RE-ID MATCH [/bold black on bright_green] "
-                    f"Tracker #{tracker_id} RECOGNIZED as Entity #{best_reid_entity} (Similarity = {best_sim * 100:.1f}%)! "
-                    f"PREVENTING DUPLICATE COUNT!"
-                )
-                return best_reid_entity
-
-        # 4. Brand New Entity Creation
-        new_entity = self.entity_next_id
-        self.entity_next_id += 1
-        self.tracker_to_entity[tracker_id] = new_entity
-        self.recent_lost_entities[new_entity] = (feet_x, feet_y, self.frame_count)
-        if feature_vec is not None:
-            self.entity_gallery[new_entity].append(feature_vec)
-
-        return new_entity
 
     def update(
         self,
@@ -175,7 +74,7 @@ class HumanCounterPhysics:
         frame_width: int,
         frame_height: int,
     ) -> Dict[str, Any]:
-        """Evaluate 3-Zone Hysteresis Gate Crossings with strict Entity Lock."""
+        """Evaluate 3-Zone Hysteresis Gate Crossings for each distinct tracked person."""
         self.frame_count += 1
         wall_x = self.get_wall_x_pixels(frame_width)
         new_counts: List[int] = []
@@ -201,15 +100,15 @@ class HumanCounterPhysics:
             feet_y = float(bbox[3])
             bbox_h = float(max(bbox[3] - bbox[1], 1.0))
 
+            # Depth & Angle Calculation
             depth_m = round(max((self.focal_length_px * self.human_height_meters) / bbox_h, 0.2), 2)
             angle_deg = round(math.degrees(math.atan2(feet_x - wall_x, self.focal_length_px)), 1)
 
             self.track_ages[tid] += 1
             age = self.track_ages[tid]
 
-            feature_vec = self.extract_visual_signature(frame, bbox)
-            entity_id = self._resolve_entity(tid, feet_x, feet_y, feature_vec)
-
+            # Direct 1:1 ByteTrack Entity Mapping
+            entity_id = tid
             is_counted = entity_id in self.counted_entities
 
             entity_telemetry[tid] = {
@@ -232,7 +131,7 @@ class HumanCounterPhysics:
             # -------------------------------------------------------------
             # LAYER 1: STRICT PERMANENT ENTITY LOCK CHECK
             # -------------------------------------------------------------
-            # If entity_id is ALREADY in self.counted_entities, it CANNOT count again!
+            # If this entity has already been counted, skip gate evaluation!
             if is_counted:
                 continue
 
@@ -327,13 +226,8 @@ class HumanCounterPhysics:
         self.count_in = 0
         self.count_out = 0
         self.counted_entities.clear()
-        self.tracker_to_entity.clear()
-        self.entity_gallery.clear()
         self.entity_zone_state.clear()
-        self.track_accumulated_features.clear()
-        self.entity_next_id = 1
         self.track_ages.clear()
         self.track_history_physics.clear()
-        self.recent_lost_entities.clear()
         self.frame_count = 0
-        console.print("[bold yellow]Physics counter engine & permanent entity lock memory reset.[/bold yellow]")
+        console.print("[bold yellow]Counter state and tracked entity memory reset.[/bold yellow]")
